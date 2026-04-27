@@ -109,9 +109,9 @@ var quotes_great = [
 
 function getQuote(s) {
   var pool;
-  if (s < 50) pool = quotes_bad;
-  else if (s < 150) pool = quotes_ok;
-  else if (s < 350) pool = quotes_good;
+  if (s < 200) pool = quotes_bad;
+  else if (s < 1000) pool = quotes_ok;
+  else if (s < 3000) pool = quotes_good;
   else pool = quotes_great;
   return pool[Math.floor(Math.random() * pool.length)];
 }
