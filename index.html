@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>🌌 霓虹捕手 Neon Catcher</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body { background: #050510; overflow: hidden; width: 100vw; height: 100vh; font-family: 'Courier New', monospace; color: #fff; user-select: none; }
+canvas { display: block; position: fixed; inset: 0; z-index: 1; }
+#ui { position: fixed; top: max(20px, env(safe-area-inset-top)); left: 20px; right: 20px; display: flex; justify-content: space-between; pointer-events: none; z-index: 2; font-weight: bold; font-size: 1.2rem; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+#overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; backdrop-filter: blur(5px); transition: opacity 0.3s; }
+#overlay h1 { font-size: 2.5rem; margin-bottom: 4px; background: linear-gradient(90deg, #00ffff, #ff00ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.by-line { font-size: 0.7rem; color: rgba(255,255,255,0.45); letter-spacing: 0.35em; margin-bottom: 22px; text-transform: uppercase; }
+.divider { width: 120px; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent); margin: 0 auto 22px; }
+.rules { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+.rule-row { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: #777; }
+.rule-icon { width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; flex-shrink: 0; color: rgba(255,255,255,0.4); }
+#finalP { font-size: 1.4rem; color: #fff; display: none; margin-bottom: 12px; }
+#quoteEl { font-size: 0.75rem; color: rgba(255,255,255,0.35); display: none; margin-bottom: 18px; font-style: italic; max-width: 260px; text-align: center; line-height: 1.6; }
+#startBtn { padding: 15px 40px; font-size: 1.2rem; background: transparent; border: 2px solid #fff; color: #fff; font-family: inherit; cursor: pointer; box-shadow: 0 0 15px rgba(255,255,255,0.2); touch-action: manipulation; }
+#startBtn:active { background: rgba(255,255,255,0.1); }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <span>得分: <span id="scoreEl">0</span></span>
+  <span>生命: <span id="livesEl">|||</span></span>
+</div>
+
+<div id="overlay">
+  <h1>NEON CATCHER</h1>
+  <p class="by-line">designed by &nbsp;行</p>
+  <div class="divider"></div>
+  <p id="finalP"></p>
+  <p id="quoteEl"></p>
+  <div class="rules">
+    <div class="rule-row">
+      <div class="rule-icon" style="border-color:#00ffff;color:#00ffff">上</div>
+      <span>点击上半屏幕 — 切换平台颜色</span>
+    </div>
+    <div class="rule-row">
+      <div class="rule-icon" style="border-color:#ff00ff;color:#ff00ff">下</div>
+      <span>滑动下半屏幕 — 移动平台位置</span>
+    </div>
+    <div class="rule-row">
+      <div class="rule-icon">✓</div>
+      <span>接住<span style="color:#00ffff">同色球</span>得分，漏接扣血</span>
+    </div>
+    <div class="rule-row">
+      <div class="rule-icon">✕</div>
+      <span>碰到<span style="color:#ff00ff">异色球</span>直接扣血</span>
+    </div>
+  </div>
+  <button id="startBtn">开始游戏</button>
+</div>
+
+<script>
+var cvs = document.getElementById('c');
+var ctx = cvs.getContext('2d');
+var overlay = document.getElementById('overlay');
+var scoreEl = document.getElementById('scoreEl');
+var livesEl = document.getElementById('livesEl');
+var finalP = document.getElementById('finalP');
+var quoteEl = document.getElementById('quoteEl');
+var startBtn = document.getElementById('startBtn');
+
+var W, H;
+var state = 'MENU';
+var score, lives, stuff, raf, lt, ls;
+var bestScore = parseInt(localStorage.getItem('neon_best') || '0');
+
+var bar = { w: 0, h: 12, x: 0, y: 0, ci: 0, glow: 0 };
+
+var quotes_bad = [
+  '手速不够，霓虹来凑。',
+  '颜色都对不上，是认知问题。',
+  '球：我来了。你：……',
+  '下次一定。（不一定）',
+  '连霓虹都嫌弃你了。',
+];
+
+var quotes_ok = [
+  '还行，至少没输得太难看。',
+  '球速在加快，你还没感觉到。',
+  '差一点就差一点，差很多也是差。',
+  '霓虹不等人。',
+  '你在进步，球也在进步。',
+];
+
+var quotes_good = [
+  '这条街的霓虹都认识你了。',
+  '反应还可以，下次别骄傲。',
+  '捕手的眼里只有颜色，没有犹豫。',
+  '你和霓虹之间开始有默契了。',
+  '这分数，霓虹表示服气。',
+];
+
+var quotes_great = [
+  '你已经是霓虹的一部分了。',
+  '这条街没人比你更快。',
+  '满城霓虹，唯你不乱。',
+  '机器都没你准。',
+  '下辈子投胎当捕手吧。',
+];
+
+function getQuote(s) {
+  var pool;
+  if (s < 50) pool = quotes_bad;
+  else if (s < 150) pool = quotes_ok;
+  else if (s < 350) pool = quotes_good;
+  else pool = quotes_great;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function resize() {
+  W = cvs.width = window.innerWidth;
+  H = cvs.height = window.innerHeight;
+}
+window.onresize = resize;
+resize();
+
+function resetBar() {
+  bar.w = W * 0.25;
+  bar.x = W/2 - bar.w/2;
+  bar.y = H - 80;
+  bar.ci = 0;
+  bar.glow = 0;
+}
+
+var CYAN = '#00ffff';
+var PINK = '#ff00ff';
+
+function drawBar() {
+  var col = CYAN;
+  if(bar.ci == 1) {
+    col = PINK;
+  }
+  var flicker = false;
+  if(bar.glow > 0) {
+    flicker = true;
+  }
+
+  ctx.save();
+  var b = 15;
+  if(flicker) {
+    b = b + Math.random() * 10;
+  }
+  ctx.shadowBlur = b;
+  ctx.shadowColor = col;
+
+  if(flicker && Math.random() > 0.5) {
+    ctx.fillStyle = '#fff';
+  } else {
+    ctx.fillStyle = col;
+  }
+
+  var r = bar.h / 2;
+  ctx.beginPath();
+  ctx.moveTo(bar.x + r, bar.y);
+  ctx.lineTo(bar.x + bar.w - r, bar.y);
+  ctx.arcTo(bar.x + bar.w, bar.y, bar.x + bar.w, bar.y + r, r);
+  ctx.arcTo(bar.x + bar.w, bar.y + bar.h, bar.x + bar.w - r, bar.y + bar.h, r);
+  ctx.lineTo(bar.x + r, bar.y + bar.h);
+  ctx.arcTo(bar.x, bar.y + bar.h, bar.x, bar.y + r, r);
+  ctx.arcTo(bar.x, bar.y, bar.x + r, bar.y, r);
+  ctx.fill();
+  if (bar.glow > 0) bar.glow--;
+  ctx.restore();
+}
+
+function burst(x, y, col, big) {
+  var n = 8;
+  if(big) n = 15;
+  for (var i = 0; i < n; i++) {
+    var a = Math.random() * 6.28;
+    var spd = Math.random() * 150 + 80;
+    if(big) spd = spd * 1.5;
+    stuff.push({
+      x: x, y: y,
+      vx: Math.cos(a) * spd,
+      vy: Math.sin(a) * spd,
+      radius: Math.random() * 3 + 1,
+      color: col,
+      life: 1.0,
+      type: 'p'
+    });
+  }
+}
+
+function ouch() {
+  lives--;
+  var str = '';
+  for(var i=0; i<lives; i++) {
+    str += '|';
+  }
+  livesEl.innerText = str;
+  if (lives <= 0) {
+    state = 'DEAD';
+    setTimeout(showDead, 400);
+  }
+}
+
+function loop(ts) {
+  if (state !== 'PLAYING') return;
+  raf = requestAnimationFrame(loop);
+
+  if (!lt) lt = ts;
+  var dt = (ts - lt) / 1000;
+  if(dt > 0.05) dt = 0.05;
+  lt = ts;
+
+  var iv = 1200 - score * 4;
+  if(iv < 400) iv = 400;
+
+  if (ts - ls > iv) {
+    var br = 8 + Math.random() * 4;
+
+    var basev = 280 + Math.random() * 80;
+    var mult = 1;
+    if(score >= 50) mult = 1.1;
+    if(score >= 100) mult = 1.3;
+    if(score >= 200) mult = 1.5;
+    if(score >= 500) mult = 1.8;
+
+    var c = 0;
+    if(Math.random() > 0.5) c = 1;
+
+    stuff.push({
+      radius: br,
+      x: br + Math.random() * (W - br * 2),
+      y: -br * 2,
+      vy: basev * mult,
+      ci: c,
+      type: 'b'
+    });
+    ls = ts;
+  }
+
+  ctx.fillStyle = '#050510';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  for (var gx = 0; gx < W; gx += 40) {
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+  }
+  for (var gy = 0; gy < H; gy += 40) {
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+  }
+
+  for (var i = 0; i < stuff.length; i++) {
+    var o = stuff[i];
+
+    if (o.type === 'b') {
+      o.y += o.vy * dt;
+      var bc = CYAN;
+      if(o.ci == 1) bc = PINK;
+
+      if (o.x + o.radius > bar.x) {
+        if (o.x - o.radius < bar.x + bar.w) {
+          if (o.y + o.radius > bar.y) {
+            if (o.y - o.radius < bar.y + bar.h) {
+              if (o.ci === bar.ci) {
+                score += 10;
+                scoreEl.innerText = score;
+                if (score > bestScore) {
+                  bestScore = score;
+                  localStorage.setItem('neon_best', bestScore);
+                }
+                burst(o.x, o.y, bc, false);
+              } else {
+                burst(o.x, o.y, '#fff', true);
+                ouch();
+              }
+              stuff.splice(i, 1);
+              i--;
+              continue;
+            }
+          }
+        }
+      }
+
+      if (o.y > H + o.radius) {
+        if (o.ci === bar.ci) {
+          burst(o.x, H - 20, '#fff', true);
+          ouch();
+        }
+        stuff.splice(i, 1);
+        i--;
+        continue;
+      }
+
+      ctx.save();
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = bc;
+      ctx.fillStyle = bc;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.radius, 0, 3.14159 * 2);
+      ctx.fill();
+      ctx.restore();
+
+    } else {
+      o.x += o.vx * dt;
+      o.y += o.vy * dt;
+      o.vy += 300 * dt;
+      o.vx = o.vx * 0.95;
+      o.life -= dt * 1.8;
+
+      if (o.life <= 0) { 
+        stuff.splice(i, 1); 
+        i--; 
+        continue; 
+      }
+
+      ctx.save();
+      if(o.life < 0) o.life = 0;
+      ctx.globalAlpha = o.life;
+      ctx.fillStyle = o.color;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.radius, 0, 3.14159 * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  drawBar();
+}
+
+const handleStart = (e) => {
+  if (e) e.preventDefault();
+  startGame();
+};
+
+startBtn.addEventListener('touchend', handleStart, { passive: false });
+startBtn.addEventListener('click', handleStart);
+
+function startGame() {
+  score = 0; lives = 3;
+  stuff = []; lt = 0; ls = 0;
+  state = 'PLAYING';
+  resetBar();
+  scoreEl.innerText = 0;
+  livesEl.innerText = '|||';
+  quoteEl.style.display = 'none';
+  overlay.style.opacity = '0';
+  setTimeout(function() { overlay.style.display = 'none'; }, 300);
+  if (raf) cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(loop);
+}
+
+function showDead() {
+  state = 'GAMEOVER';
+  cancelAnimationFrame(raf);
+  startBtn.innerText = '再来一局';
+  if (score >= bestScore && score > 0) {
+    finalP.innerHTML = '最终得分: ' + score + ' 🏆 新纪录！';
+  } else {
+    finalP.innerHTML = '最终得分: ' + score + '<br><span style="font-size:0.9rem;color:#aaa">最高纪录: ' + bestScore + '</span>';
+  }
+  finalP.style.display = 'block';
+  quoteEl.innerText = getQuote(score);
+  quoteEl.style.display = 'block';
+  overlay.style.display = 'flex';
+  setTimeout(function() { overlay.style.opacity = '1'; }, 10);
+}
+
+cvs.ontouchstart = function(e) {
+  if (state !== 'PLAYING') return;
+  var t = e.touches[0];
+  if (t.clientY < H / 2) {
+    if(bar.ci == 0) bar.ci = 1;
+    else bar.ci = 0;
+    bar.glow = 10;
+  } else {
+    var nx = t.clientX - bar.w / 2;
+    if(nx < 0) nx = 0;
+    if(nx > W - bar.w) nx = W - bar.w;
+    bar.x = nx;
+  }
+};
+
+cvs.ontouchmove = function(e) {
+  e.preventDefault();
+  if (state !== 'PLAYING') return;
+  var t = e.touches[0];
+  if (t.clientY >= H / 2) {
+    var nx = t.clientX - bar.w / 2;
+    if(nx < 0) nx = 0;
+    if(nx > W - bar.w) nx = W - bar.w;
+    bar.x = nx;
+  }
+};
+</script>
+</body>
+</html>
